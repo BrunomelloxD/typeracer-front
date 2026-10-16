@@ -1,22 +1,15 @@
 interface CountdownProps {
-    value: number; // 0 mostra "GO!"
+    value: number; // 0 mostra "Já"
 }
 
 export function Countdown({ value }: CountdownProps) {
-    const text = value === 0 ? 'GO!' : String(value);
+    const text = value === 0 ? 'Já' : String(value);
     return (
-        <div
-            className="flex h-32 items-center justify-center"
-            role="timer"
-            aria-live="assertive"
-            aria-atomic="true"
-        >
-            <span
-                key={value}
-                className="text-7xl font-bold text-emerald-400 tabular-nums motion-safe:animate-pulse"
-            >
+        <div role="status" aria-live="polite" aria-atomic="true" className="flex flex-col items-center gap-2">
+            <span key={value} className="countdown-pop font-mono text-7xl text-accent tabular-nums sm:text-8xl">
                 {text}
             </span>
+            {value !== 0 && <span className="text-sm text-muted">prepare-se</span>}
         </div>
     );
 }
