@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "promote_threshold": 2,
+  "window_days": 45,
+  "quarantine_threshold": 2,
+  "next_id": 3,
+  "lessons": [
+    {
+      "id": "L-001",
+      "key": "spec_precision_gap::state whether keyboard only controls such as skip links are in scope of touch target size requirements and size them to the same minimum",
+      "text": "State whether keyboard-only controls such as skip links are in scope of touch-target size requirements and size them to the same minimum",
+      "signal": "spec_precision_gap",
+      "scope": "ui-a11y",
+      "status": "candidate",
+      "features": [
+        "ux-redesign"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "GLOB-07 src/App.tsx:13 (ui-a11y)"
+      ],
+      "created": "2026-10-16T19:19:32Z",
+      "last_seen": "2026-10-16T19:19:32Z"
+    },
+    {
+      "id": "L-002",
+      "key": "spec_precision_gap::define the focus indicator for visually hidden proxy inputs explicitly instead of relying on the global focus visible outline",
+      "text": "Define the focus indicator for visually hidden proxy inputs explicitly instead of relying on the global focus-visible outline",
+      "signal": "spec_precision_gap",
+      "scope": "ui-a11y",
+      "status": "candidate",
+      "features": [
+        "ux-redesign"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "GLOB-05 src/components/TypingArea.tsx:177 (ui-a11y)"
+      ],
+      "created": "2026-10-16T19:19:32Z",
+      "last_seen": "2026-10-16T19:19:32Z"
+    }
+  ]
+}

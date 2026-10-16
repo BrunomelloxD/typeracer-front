@@ -1,22 +1,27 @@
 interface ProgressBarProps {
     progress: number;
     label?: string;
-    color?: 'emerald' | 'sky';
+    tone?: 'accent' | 'rival';
 }
 
-export function ProgressBar({ progress, label, color = 'emerald' }: ProgressBarProps) {
-    const pct = Math.max(0, Math.min(100, progress));
-    const fill = color === 'emerald' ? 'bg-emerald-500' : 'bg-sky-500';
+// Classes literais por tom para o Tailwind enxergá-las.
+const FILL = {
+    accent: 'bg-accent',
+    rival: 'bg-rival',
+} as const;
+
+export function ProgressBar({ progress, label, tone = 'accent' }: ProgressBarProps) {
+    const pct = Number.isFinite(progress) ? Math.max(0, Math.min(100, progress)) : 0;
     return (
         <div className="space-y-1">
             {label && (
-                <div className="flex items-center justify-between text-xs text-zinc-400">
+                <div className="flex items-center justify-between text-xs text-muted">
                     <span>{label}</span>
-                    <span className="tabular-nums">{pct.toFixed(0)}%</span>
+                    <span className="font-mono tabular-nums">{pct.toFixed(0)}%</span>
                 </div>
             )}
             <div
-                className="h-2 w-full overflow-hidden rounded-full bg-zinc-800"
+                className="h-[3px] w-full overflow-hidden rounded-full bg-line"
                 role="progressbar"
                 aria-valuemin={0}
                 aria-valuemax={100}
@@ -24,8 +29,8 @@ export function ProgressBar({ progress, label, color = 'emerald' }: ProgressBarP
                 aria-label={label ?? 'Progresso'}
             >
                 <div
-                    className={`h-full ${fill} transition-all duration-150 ease-out`}
-                    style={{ width: `${pct}%` }}
+                    className={`h-full w-full origin-left rounded-full transition-transform duration-150 ease-brass ${FILL[tone]}`}
+                    style={{ transform: `scaleX(${pct / 100})` }}
                 />
             </div>
         </div>

@@ -7,10 +7,10 @@ import { NotFoundPage } from './pages/NotFoundPage';
 
 export default function App() {
     return (
-        <div className="min-h-screen bg-zinc-950 text-zinc-100">
+        <div className="min-h-dvh bg-bg text-ink">
             <a
                 href="#main"
-                className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-emerald-500 focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-zinc-950"
+                className="sr-only focus:not-sr-only focus:fixed focus:inline-flex focus:min-h-11 focus:items-center focus:left-4 focus:top-4 focus:z-50 focus:rounded-full focus:bg-accent focus:px-5 focus:py-2.5 focus:text-sm focus:font-semibold focus:text-on-accent"
             >
                 Pular para o conteúdo
             </a>

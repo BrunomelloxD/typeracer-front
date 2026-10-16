@@ -1,53 +1,105 @@
 @import "tailwindcss";
 
-:root {
+/* Direção A — Graphite & Brass (AD-003): única fonte de cor, fonte e easing. */
+@theme {
+    --color-bg: #0E0F12;
+    --color-surface: #16181D;
+    --color-surface-2: #1D2027;
+    --color-core: #121419;
+    --color-line: #2A2D35;
+    --color-ink: #E8E6E1;
+    --color-muted: #8A8F98;
+    --color-untyped: #80858F;
+    --color-accent: #E2B75A;
+    --color-on-accent: #0E0F12;
+    --color-rival: #7FA7C9;
+    --color-error: #F0716B;
+    --color-ok: #7BC89A;
+
+    --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+    --ease-brass: cubic-bezier(.32, .72, 0, 1);
+}
+
+html {
     color-scheme: dark;
-    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    /* O header sticky não cobre o elemento focado ao rolar pelo teclado */
+    scroll-padding-top: 5rem;
 }
 
 html,
 body,
 #root {
-    height: 100%;
+    min-height: 100%;
 }
 
 body {
     margin: 0;
+    background: var(--color-bg);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
 }
 
-.font-mono-typing {
-    font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
-    letter-spacing: 0.02em;
-}
-
-/* Cursor piscante na posição atual da digitação */
-@keyframes typing-cursor-blink {
-    0%, 49% { background-color: rgba(16, 185, 129, 0.45); }
-    50%, 100% { background-color: rgba(16, 185, 129, 0.1); }
-}
-.typing-cursor {
-    animation: typing-cursor-blink 1s steps(2, end) infinite;
-    border-radius: 2px;
-}
-
-/* Shake horizontal em erros */
-@keyframes shake-x {
-    0%, 100% { transform: translateX(0); }
-    25% { transform: translateX(-4px); }
-    75% { transform: translateX(4px); }
-}
-.animate-shake {
-    animation: shake-x 0.25s ease-in-out 1;
-}
-
-/* Foco visível padronizado para teclado */
-:where(button, a, input, textarea, [role="button"]):focus-visible {
-    outline: 2px solid #34d399;
+/* Foco visível padronizado para teclado (GLOB-05) */
+:where(button, a, input, textarea, select, [role="button"], [role="radio"], [tabindex]):focus-visible {
+    outline: 2px solid var(--color-accent);
     outline-offset: 2px;
-    border-radius: 6px;
 }
 
-/* Respeito a prefers-reduced-motion */
+/* Toque: sem atraso de duplo toque e sem flash cinza */
+:where(button, a, input, textarea, label, [role="button"], [role="radio"]) {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+    background: color-mix(in oklab, var(--color-accent) 35%, transparent);
+}
+
+/* Modo foco: elementos periféricos esmaecem durante a corrida (MET-06) */
+.race-dim {
+    transition: opacity .2s var(--ease-brass);
+}
+
+body[data-race="running"] .race-dim {
+    opacity: .35;
+}
+
+body[data-race="running"] .race-dim:hover,
+body[data-race="running"] .race-dim:focus-within {
+    opacity: 1;
+}
+
+/* Caret da área de digitação: pisca só quando parado */
+@keyframes caret-blink {
+    0% { opacity: 1; }
+    100% { opacity: 0; }
+}
+
+.caret-blink {
+    animation: caret-blink 1s steps(2, start) infinite;
+}
+
+/* Número do countdown: scale + fade */
+@keyframes countdown-pop {
+    from {
+        transform: scale(1.15);
+        opacity: 0;
+    }
+    to {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+.countdown-pop {
+    animation: countdown-pop 300ms var(--ease-brass);
+}
+
+/* Respeito a prefers-reduced-motion (GLOB-06) */
 @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
@@ -56,115 +108,8 @@ body {
         animation-iteration-count: 1 !important;
         transition-duration: 0.001ms !important;
     }
-}
-:root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
-
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-
-  @media (max-width: 1024px) {
-    font-size: 16px;
-  }
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
-
-  #social .button-icon {
-    filter: invert(1) brightness(2);
-  }
-}
-
-#root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
-  min-height: 100svh;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-}
-
-h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
-}
-
-h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
-  }
-}
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
-  }
-}
-p {
-  margin: 0;
-}
-
-code,
-.counter {
-  font-family: var(--mono);
-  display: inline-flex;
-  border-radius: 4px;
-  color: var(--text-h);
-}
-
-code {
-  font-size: 15px;
-  line-height: 135%;
-  padding: 4px 8px;
-  background: var(--code-bg);
+    .caret-blink {
+        animation: none !important;
+    }
 }

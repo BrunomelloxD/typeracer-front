@@ -1,16 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { ConnectionBadge } from '../components/ConnectionBadge';
 import { CopyButton } from '../components/CopyButton';
 import { Countdown } from '../components/Countdown';
-import { ProgressBar } from '../components/ProgressBar';
-import { StatPill } from '../components/StatPill';
+import { DuelResult } from '../components/DuelResult';
+import { Kbd } from '../components/Kbd';
+import { RaceStats } from '../components/RaceStats';
+import { RaceTrack } from '../components/RaceTrack';
 import { TypingArea } from '../components/TypingArea';
+import { useConnectionStatus } from '../hooks/useConnectionStatus';
+import { useRaceFocusMode } from '../hooks/useRaceFocusMode';
 import { calculateWpm, useSocket } from '../hooks/useSocket';
 import { useTimer } from '../hooks/useTimer';
 import { useTyping } from '../hooks/useTyping';
 import { api } from '../lib/api';
 import { disconnectGameSocket } from '../lib/socket';
+import { bezelInner, bezelOuter, btnGhost, btnPrimary, btnSecondary } from '../lib/ui';
 import { usePlayerStore } from '../store/playerStore';
 import type { RankingEntry } from '../types/api';
 
@@ -24,28 +29,59 @@ interface OpponentState {
     finishedWpm?: number;
 }
 
+const STATUS_TEXT = {
+    connecting: 'Conectando…',
+    reconnecting: 'Reconectando…',
+    offline: 'Sem conexão',
+} as const;
+
+function oneDecimal(value: number): string {
+    return value.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
+
+function initialOf(name: string): string {
+    return name.trim().charAt(0).toUpperCase() || '?';
+}
+
 export function DuelPage() {
     const navigate = useNavigate();
+    const location = useLocation();
+    const [params] = useSearchParams();
     const playerName = usePlayerStore(s => s.playerName);
-    const { socket, connected } = useSocket();
+    const { socket } = useSocket();
+    const status = useConnectionStatus(socket);
+
+    // DUEL-05/06: só aceita `?code=` com exatamente 6 dígitos.
+    const queryCode = params.get('code') ?? '';
+    const initialCode = /^\d{6}$/.test(queryCode) ? queryCode : '';
 
     const [phase, setPhase] = useState<Phase>('lobby');
     const [code, setCode] = useState('');
-    const [inputCode, setInputCode] = useState('');
+    const [inputCode, setInputCode] = useState(() => initialCode);
     const [text, setText] = useState<string>('');
     const [countdown, setCountdown] = useState(3);
     const [opponent, setOpponent] = useState<OpponentState | null>(null);
     const [ranking, setRanking] = useState<RankingEntry[] | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [opponentLeft, setOpponentLeft] = useState(false);
     const [announce, setAnnounce] = useState('');
 
     const typing = useTyping(text);
     const timer = useTimer(DURATION_MS);
     const finishedRef = useRef(false);
+    const primaryRef = useRef<HTMLButtonElement>(null);
+    const joinRef = useRef<HTMLButtonElement>(null);
+    const joinFocusedRef = useRef(false);
 
+    // HOME-05: sem nome, volta para a Home lembrando o destino (com query string).
     useEffect(() => {
-        if (!playerName) navigate('/');
-    }, [playerName, navigate]);
+        if (!playerName) {
+            navigate('/', {
+                replace: true,
+                state: { redirectTo: location.pathname + location.search },
+            });
+        }
+    }, [playerName, navigate, location.pathname, location.search]);
 
     const resetToLobby = useCallback(() => {
         finishedRef.current = false;
@@ -57,6 +93,7 @@ export function DuelPage() {
         setOpponent(null);
         setRanking(null);
         setError(null);
+        setOpponentLeft(false);
         setAnnounce('');
         typing.reset();
         timer.reset();
@@ -115,11 +152,13 @@ export function DuelPage() {
         const onPlayerLeft = (data?: { playerName?: string }) => {
             const who = data?.playerName ?? 'O oponente';
             setError(`${who} saiu da sala.`);
+            setOpponentLeft(true);
             setAnnounce(`${who} saiu da sala`);
         };
         const onError = (e: { message?: string } | string) => {
             const msg = typeof e === 'string' ? e : e?.message ?? 'Erro no servidor';
             setError(msg);
+            setOpponentLeft(false);
         };
 
         socket.on('player_joined', onPlayerJoined);
@@ -216,81 +255,152 @@ export function DuelPage() {
         socket.emit('join_room', { code: inputCode, playerName });
     };
 
-    const remainingSec = Math.ceil(timer.remainingMs / 1000);
-    const timerTone =
-        remainingSec <= 5 ? 'danger' : remainingSec <= 10 ? 'warning' : 'default';
+    // DUEL-05: com código no link, foca "Entrar na sala" assim que o botão fica habilitado.
+    useEffect(() => {
+        if (!initialCode || joinFocusedRef.current || phase !== 'lobby' || status !== 'connected') return;
+        joinFocusedRef.current = true;
+        joinRef.current?.focus();
+    }, [initialCode, phase, status]);
 
+    // KEY-04: foco em "Nova partida" quando o resultado chega.
+    useEffect(() => {
+        if (phase === 'finished' && ranking) primaryRef.current?.focus();
+    }, [phase, ranking]);
+
+    // KEY-05: Esc sai da sala na espera; no resultado volta ao início.
+    const escapeRef = useRef<() => boolean>(() => false);
+    useEffect(() => {
+        escapeRef.current = () => {
+            if (phase === 'waiting') {
+                resetToLobby();
+                return true;
+            }
+            if (phase === 'finished') {
+                navigate('/');
+                return true;
+            }
+            return false;
+        };
+    });
+    useEffect(() => {
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.key !== 'Escape') return;
+            if (escapeRef.current()) e.preventDefault();
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, []);
+
+    // MET-06: modo foco enquanto corre.
+    useRaceFocusMode(phase === 'running');
+
+    const remainingSec = Math.ceil(timer.remainingMs / 1000);
+    const connected = status === 'connected';
+
+    // RES-06: anuncia o resultado do jogador; fora disso, os avisos da sala.
+    const myResult = phase === 'finished' ? ranking?.find(r => r.playerName === playerName) : undefined;
     const liveRegion = (
         <div className="sr-only" aria-live="polite" role="status">
-            {announce}
+            {myResult
+                ? `Resultado: ${myResult.wpm} palavras por minuto, precisão ${oneDecimal(myResult.accuracy)}%`
+                : announce}
+        </div>
+    );
+
+    // DUEL-08: saída do oponente oferece voltar ao lobby.
+    const errorBox = error && (
+        <div
+            role="alert"
+            className="mb-6 flex flex-col gap-3 rounded-2xl bg-error/8 p-4 ring-1 ring-error/30 sm:flex-row sm:items-center sm:justify-between"
+        >
+            <p className="text-sm font-semibold text-error">{error}</p>
+            {opponentLeft && (
+                <button type="button" onClick={resetToLobby} className={`${btnSecondary} shrink-0`}>
+                    Voltar ao lobby
+                </button>
+            )}
         </div>
     );
 
     if (phase === 'lobby') {
+        const connHint = connected ? undefined : 'duel-conn-hint';
         return (
-            <div className="mx-auto max-w-2xl px-4 py-8 sm:py-12">
+            <div className="mx-auto max-w-[1040px] px-4 py-8 sm:py-12">
                 {liveRegion}
                 <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-                    <h2 className="text-2xl font-semibold">Modo Duelo</h2>
-                    <ConnectionBadge connected={connected} />
+                    <h1 className="text-3xl font-semibold tracking-[-0.02em] text-ink">Modo Duelo</h1>
+                    <ConnectionBadge status={status} />
                 </div>
 
-                {error && (
-                    <div
-                        className="mb-4 rounded-md border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-300"
-                        role="alert"
-                    >
-                        {error}
-                    </div>
+                {errorBox}
+
+                {!connected && (
+                    <p id="duel-conn-hint" className="mb-4 text-sm text-muted">
+                        Aguardando conexão com o servidor…
+                    </p>
                 )}
 
                 <div className="grid gap-6 md:grid-cols-2">
-                    <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-5">
-                        <h3 className="mb-3 font-medium">Criar duelo</h3>
-                        <p className="mb-4 text-sm text-zinc-400">
-                            Gera um código de 6 dígitos para compartilhar com seu oponente.
-                        </p>
-                        <button
-                            type="button"
-                            disabled={!connected}
-                            onClick={handleCreate}
-                            className="min-h-[44px] w-full rounded-md bg-emerald-500 px-4 font-medium text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                            Criar sala
-                        </button>
-                    </div>
+                    <section className={bezelOuter} aria-labelledby="duel-create-title">
+                        <div className={`${bezelInner} flex h-full flex-col gap-4 p-6 sm:p-8`}>
+                            <h2 id="duel-create-title" className="text-xl font-semibold tracking-[-0.02em] text-ink">
+                                Criar duelo
+                            </h2>
+                            <p className="text-muted">
+                                Gera um código de 6 dígitos e um link para mandar ao oponente.
+                            </p>
+                            <button
+                                type="button"
+                                disabled={!connected}
+                                aria-describedby={connHint}
+                                onClick={handleCreate}
+                                className={`${btnPrimary} mt-auto w-full`}
+                            >
+                                Criar sala
+                            </button>
+                        </div>
+                    </section>
 
                     <form
-                        className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-5"
+                        className={bezelOuter}
+                        aria-labelledby="duel-join-title"
                         onSubmit={e => {
                             e.preventDefault();
                             handleJoin();
                         }}
                     >
-                        <h3 className="mb-3 font-medium">Entrar em duelo</h3>
-                        <label htmlFor="room-code" className="sr-only">
-                            Código da sala
-                        </label>
-                        <input
-                            id="room-code"
-                            type="text"
-                            inputMode="numeric"
-                            autoComplete="one-time-code"
-                            maxLength={6}
-                            value={inputCode}
-                            onChange={e =>
-                                setInputCode(e.target.value.replace(/\D/g, '').slice(0, 6))
-                            }
-                            placeholder="000000"
-                            className="mb-3 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-center font-mono-typing text-2xl tracking-widest text-zinc-100 outline-none transition focus:border-sky-500"
-                        />
-                        <button
-                            type="submit"
-                            disabled={!connected || inputCode.length !== 6}
-                            className="min-h-[44px] w-full rounded-md border border-sky-500 px-4 font-medium text-sky-300 transition hover:bg-sky-500/10 disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                            Entrar na sala
-                        </button>
+                        <div className={`${bezelInner} flex h-full flex-col gap-4 p-6 sm:p-8`}>
+                            <h2 id="duel-join-title" className="text-xl font-semibold tracking-[-0.02em] text-ink">
+                                Entrar em duelo
+                            </h2>
+                            <label htmlFor="room-code" className="sr-only">
+                                Código da sala
+                            </label>
+                            <input
+                                id="room-code"
+                                name="room-code"
+                                type="text"
+                                spellCheck={false}
+                                inputMode="numeric"
+                                autoComplete="one-time-code"
+                                maxLength={6}
+                                value={inputCode}
+                                onChange={e =>
+                                    setInputCode(e.target.value.replace(/\D/g, '').slice(0, 6))
+                                }
+                                placeholder="000000"
+                                className="h-14 w-full rounded-2xl bg-core px-4 text-center font-mono text-2xl tracking-[0.4em] text-ink ring-1 ring-line outline-none transition duration-200 ease-brass placeholder:text-untyped focus:ring-accent/60"
+                            />
+                            <button
+                                ref={joinRef}
+                                type="submit"
+                                disabled={!connected || inputCode.length !== 6}
+                                aria-describedby={connHint}
+                                className={`${btnSecondary} mt-auto w-full`}
+                            >
+                                Entrar na sala
+                            </button>
+                        </div>
                     </form>
                 </div>
             </div>
@@ -298,228 +408,214 @@ export function DuelPage() {
     }
 
     if (phase === 'waiting') {
+        const inviteUrl = `${window.location.origin}/duel?code=${code}`;
         return (
-            <div className="mx-auto max-w-2xl px-4 py-12 text-center sm:py-16">
+            <div className="mx-auto max-w-[1040px] px-4 py-8 sm:py-12">
                 {liveRegion}
-                <h2 className="mb-2 text-xl text-zinc-400">Aguardando oponente...</h2>
-                <div className="my-6 inline-block rounded-xl border border-emerald-500/40 bg-emerald-500/5 px-8 py-6">
-                    <div className="text-xs uppercase tracking-wider text-emerald-300">
-                        Código da sala
-                    </div>
-                    <div
-                        className="font-mono-typing text-5xl font-bold text-emerald-300 tabular-nums"
-                        aria-label={`Código ${code.split('').join(' ')}`}
-                    >
-                        {code}
-                    </div>
-                </div>
-                <div className="flex flex-wrap items-center justify-center gap-3">
-                    <CopyButton value={code} />
-                    <button
-                        type="button"
-                        onClick={resetToLobby}
-                        className="min-h-[44px] rounded-md border border-zinc-700 px-4 text-sm text-zinc-300 transition hover:border-rose-500/60 hover:text-rose-300"
-                    >
-                        Cancelar
+                <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
+                    <button type="button" onClick={resetToLobby} className={`${btnGhost} -ml-3`}>
+                        ← Sair da sala
+                        <Kbd>Esc</Kbd>
                     </button>
+                    <ConnectionBadge status={status} />
                 </div>
-                <p className="mt-4 text-sm text-zinc-500">
-                    Compartilhe o código com seu oponente para começar.
-                </p>
-                {error && (
-                    <p className="mt-4 text-sm text-rose-300" role="alert">
-                        {error}
-                    </p>
-                )}
+
+                {errorBox}
+
+                <section className={`${bezelOuter} mx-auto max-w-[680px] text-center`} aria-labelledby="duel-wait-title">
+                    <div className={`${bezelInner} px-5 py-8 sm:px-10 sm:py-10`}>
+                        <p className="text-[13px] font-semibold text-accent">Sala criada</p>
+                        <h1
+                            id="duel-wait-title"
+                            className="mt-2 text-2xl font-semibold tracking-[-0.02em] text-ink sm:text-[32px]"
+                        >
+                            Chame alguém para correr
+                        </h1>
+
+                        <div
+                            role="group"
+                            aria-label={`Código da sala ${code.split('').join(' ')}`}
+                            className="mt-8 flex justify-center gap-2 sm:gap-3"
+                        >
+                            {code.split('').map((digit, i) => (
+                                <span
+                                    key={i}
+                                    aria-hidden="true"
+                                    className="grid h-[60px] w-11 place-items-center rounded-[14px] bg-surface-2 font-mono text-[28px] text-accent ring-1 ring-line sm:h-[88px] sm:w-[72px] sm:text-[44px]"
+                                >
+                                    {digit}
+                                </span>
+                            ))}
+                        </div>
+
+                        <div className="mt-8 flex items-center gap-3 rounded-full bg-surface-2 p-1.5 pl-5 ring-1 ring-line">
+                            <span className="min-w-0 flex-1 truncate text-left font-mono text-[15px] text-muted">
+                                {inviteUrl}
+                            </span>
+                            <CopyButton
+                                variant="primary"
+                                value={inviteUrl}
+                                label="Copiar link"
+                                copiedLabel="Link copiado"
+                                className="shrink-0"
+                            />
+                        </div>
+                        <p className="mt-4 text-[13px] text-muted">ou só o código</p>
+                        <div className="mt-2 flex justify-center">
+                            <CopyButton value={code} />
+                        </div>
+
+                        <div className="mt-8 border-t border-line pt-6 text-left">
+                            <div className="flex items-center justify-between">
+                                <h2 className="text-[13px] font-semibold text-ink">Jogadores</h2>
+                                <span className="font-mono text-sm text-muted tabular-nums">
+                                    {opponent ? '2/2' : '1/2'}
+                                </span>
+                            </div>
+                            <ul className="mt-4 space-y-3">
+                                <li className="flex items-center gap-3">
+                                    <span
+                                        aria-hidden="true"
+                                        className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent/15 text-xs font-semibold text-accent"
+                                    >
+                                        {initialOf(playerName)}
+                                    </span>
+                                    <span className="min-w-0 truncate font-semibold text-ink">{playerName}</span>
+                                    <span className="text-xs font-semibold text-accent">você</span>
+                                    <span className="ml-auto flex items-center gap-2 text-sm text-ok">
+                                        <span aria-hidden="true" className="size-2 rounded-full bg-ok" />
+                                        pronto
+                                    </span>
+                                </li>
+                                <li className="flex items-center gap-3">
+                                    {opponent ? (
+                                        <>
+                                            <span
+                                                aria-hidden="true"
+                                                className="grid size-8 shrink-0 place-items-center rounded-lg bg-rival/15 text-xs font-semibold text-rival"
+                                            >
+                                                {initialOf(opponent.playerName)}
+                                            </span>
+                                            <span className="min-w-0 truncate font-semibold text-ink">
+                                                {opponent.playerName}
+                                            </span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <span
+                                                aria-hidden="true"
+                                                className="size-8 shrink-0 rounded-lg border border-dashed border-line"
+                                            />
+                                            <span className="text-untyped">Aguardando oponente…</span>
+                                            <span aria-hidden="true" className="ml-auto flex gap-1.5">
+                                                {[0, 1, 2].map(i => (
+                                                    <span
+                                                        key={i}
+                                                        className="size-1.5 rounded-full bg-untyped motion-safe:animate-pulse"
+                                                        style={{ animationDelay: `${i * 200}ms` }}
+                                                    />
+                                                ))}
+                                            </span>
+                                        </>
+                                    )}
+                                </li>
+                            </ul>
+                        </div>
+
+                        <p className="mt-8 text-[13px] text-muted">
+                            A partida começa sozinha quando o oponente entrar: contagem de 3 s.
+                        </p>
+                    </div>
+                </section>
             </div>
         );
     }
 
     if (phase === 'countdown') {
         return (
-            <div className="mx-auto max-w-3xl px-4 py-8 text-center sm:py-12">
+            <div className="mx-auto max-w-[1040px] px-4 py-8 sm:py-12">
                 {liveRegion}
-                <p className="mb-2 text-sm text-zinc-400">
+                <h1 className="sr-only">Duelo: contagem regressiva</h1>
+                {errorBox}
+                <p className="mb-4 text-center text-sm text-muted">
                     Vs. {opponent?.playerName ?? 'oponente'}
                 </p>
                 <Countdown value={countdown} />
-                <div className="mt-8 rounded-xl border border-zinc-800 bg-zinc-900/40 p-6 text-left">
-                    <p className="font-mono-typing text-base leading-relaxed text-zinc-500 sm:text-lg">
-                        {text}
-                    </p>
+                {/* DUEL-07: texto visível com caret na 1ª letra e entrada desabilitada. */}
+                <div className="mt-8">
+                    <TypingArea target={text} typed="" onChange={() => {}} disabled />
                 </div>
             </div>
         );
     }
 
-    return (
-        <div className="mx-auto max-w-6xl px-4 py-6">
-            {liveRegion}
-            <div className="mb-4 grid grid-cols-3 gap-3">
-                <StatPill
-                    label="Tempo"
-                    value={remainingSec}
-                    suffix="s"
-                    tone={timerTone}
-                    live
+    if (phase === 'finished' && ranking) {
+        return (
+            <div className="mx-auto max-w-[1040px] px-4 py-8 sm:py-12">
+                {liveRegion}
+                <h1 className="sr-only">Resultado do duelo</h1>
+                {errorBox}
+                <DuelResult
+                    ranking={ranking}
+                    me={playerName}
+                    code={code}
+                    onPlayAgain={resetToLobby}
+                    onLeave={() => navigate('/')}
+                    primaryRef={primaryRef}
                 />
-                <StatPill label="WPM" value={wpm} live />
-                <StatPill label="Acurácia" value={typing.accuracy.toFixed(0)} suffix="%" />
+            </div>
+        );
+    }
+
+    return (
+        <div className="mx-auto max-w-[1040px] px-4 py-6 sm:py-8">
+            {liveRegion}
+            <h1 className="sr-only">Duelo em andamento</h1>
+            <RaceTrack
+                lanes={[
+                    { name: playerName, tag: 'você', progress: typing.progress, tone: 'accent' },
+                    {
+                        name: opponent?.playerName ?? 'Oponente',
+                        tag: 'oponente',
+                        progress: opponent?.progress ?? 0,
+                        tone: 'rival',
+                    },
+                ]}
+            />
+
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                <span className="font-mono text-[13px] text-muted">Sala {code}</span>
+                <ConnectionBadge status={status} />
             </div>
 
-            {error && (
+            {/* CONN-04 */}
+            {status !== 'connected' && (
                 <div
-                    className="mb-3 rounded-md border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-300"
-                    role="alert"
+                    role="status"
+                    className={`mt-4 rounded-2xl p-4 ring-1 ${
+                        status === 'offline' ? 'bg-error/8 ring-error/30' : 'bg-accent/8 ring-accent/30'
+                    }`}
                 >
-                    {error}
+                    <p className={`font-semibold ${status === 'offline' ? 'text-error' : 'text-accent'}`}>
+                        {STATUS_TEXT[status]}
+                    </p>
+                    <p className="mt-1 text-sm text-muted">Seu progresso continua salvo localmente.</p>
                 </div>
             )}
 
-            <div className="grid gap-4 md:grid-cols-2">
-                {/* Você */}
-                <section
-                    className="space-y-3 rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-4"
-                    aria-label="Sua corrida"
-                >
-                    <div className="flex items-center justify-between">
-                        <span className="font-medium text-emerald-300">{playerName} (você)</span>
-                        <span className="text-xs text-zinc-400 tabular-nums">{wpm} wpm</span>
-                    </div>
-                    <ProgressBar progress={typing.progress} color="emerald" label="Você" />
-                    {phase === 'running' && text ? (
-                        <TypingArea
-                            target={text}
-                            typed={typing.typed}
-                            onChange={typing.setTyped}
-                            disabled={phase !== 'running'}
-                        />
-                    ) : (
-                        <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6 text-zinc-500">
-                            {phase === 'finished' ? 'Partida encerrada.' : 'Aguardando...'}
-                        </div>
-                    )}
-                </section>
-
-                {/* Oponente */}
-                <section
-                    className="space-y-3 rounded-xl border border-sky-500/40 bg-sky-500/5 p-4"
-                    aria-label="Corrida do oponente"
-                >
-                    <div className="flex items-center justify-between">
-                        <span className="font-medium text-sky-300">
-                            {opponent?.playerName ?? 'Oponente'}
-                        </span>
-                        {opponent?.finishedWpm !== undefined && (
-                            <span className="text-xs text-zinc-400 tabular-nums">
-                                {opponent.finishedWpm} wpm
-                            </span>
-                        )}
-                    </div>
-                    <ProgressBar
-                        progress={opponent?.progress ?? 0}
-                        color="sky"
-                        label={opponent?.playerName ?? 'Oponente'}
-                    />
-                    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-6">
-                        <p className="font-mono-typing text-base leading-relaxed text-zinc-500">
-                            {text || 'Aguardando texto...'}
-                        </p>
-                    </div>
-                </section>
+            <div className="mt-4 mb-6">
+                <RaceStats remainingSec={remainingSec} wpm={wpm} accuracy={typing.accuracy} />
             </div>
 
-            {phase === 'finished' && ranking && (
-                <FinalRanking
-                    ranking={ranking}
-                    me={playerName}
-                    onPlayAgain={resetToLobby}
-                    onLeave={() => navigate('/')}
-                />
-            )}
+            {errorBox}
 
-            <div className="mt-4 flex items-center justify-center gap-3 text-xs text-zinc-600">
-                <span>
-                    Sala: <span className="font-mono">{code}</span>
-                </span>
-                <ConnectionBadge connected={connected} />
-            </div>
+            {/* DUEL-01: o texto aparece uma vez só. */}
+            <TypingArea
+                target={text}
+                typed={typing.typed}
+                onChange={typing.setTyped}
+                disabled={phase !== 'running'}
+            />
         </div>
-    );
-}
-
-function FinalRanking({
-    ranking,
-    me,
-    onPlayAgain,
-    onLeave,
-}: {
-    ranking: RankingEntry[];
-    me: string;
-    onPlayAgain: () => void;
-    onLeave: () => void;
-}) {
-    return (
-        <section
-            className="mt-6 rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-6"
-            aria-live="polite"
-        >
-            <h3 className="mb-4 text-center text-2xl font-semibold text-emerald-300">
-                Resultado final
-            </h3>
-            <ol className="space-y-2">
-                {ranking.map(r => {
-                    const isMe = r.playerName === me;
-                    return (
-                        <li
-                            key={`${r.position}-${r.playerName}`}
-                            className={`flex flex-wrap items-center justify-between gap-2 rounded-md border p-3 transition ${
-                                isMe
-                                    ? 'border-emerald-500/60 bg-emerald-500/10'
-                                    : 'border-zinc-800 bg-zinc-900/40'
-                            }`}
-                        >
-                            <span className="flex items-center gap-3">
-                                <span
-                                    className={`font-mono text-lg tabular-nums ${
-                                        r.position === 1 ? 'text-amber-300' : 'text-emerald-400'
-                                    }`}
-                                >
-                                    #{r.position}
-                                </span>
-                                <span className="font-medium">
-                                    {r.playerName}
-                                    {isMe && (
-                                        <span className="ml-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-300">
-                                            você
-                                        </span>
-                                    )}
-                                </span>
-                            </span>
-                            <span className="text-sm text-zinc-400 tabular-nums">
-                                {r.wpm} wpm · {r.accuracy.toFixed(0)}% ·{' '}
-                                {(r.durationMs / 1000).toFixed(1)}s
-                            </span>
-                        </li>
-                    );
-                })}
-            </ol>
-            <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
-                <button
-                    type="button"
-                    onClick={onPlayAgain}
-                    className="min-h-[44px] rounded-md bg-emerald-500 px-5 font-medium text-zinc-950 transition hover:bg-emerald-400"
-                >
-                    Jogar novamente
-                </button>
-                <button
-                    type="button"
-                    onClick={onLeave}
-                    className="min-h-[44px] rounded-md border border-zinc-700 px-5 text-zinc-300 transition hover:border-zinc-500"
-                >
-                    Voltar ao início
-                </button>
-            </div>
-        </section>
     );
 }
